@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { Checkout, CheckoutStatus } from "../shared/types.js";
-import type { CreateCheckoutInput, UpdateCheckoutInput } from "../marketplace/checkout-store.js";
+import type { CreateCheckoutInput } from "../marketplace/checkout-store.js";
 
 export interface MarketplaceFlow {
   checkouts: Checkout[];
