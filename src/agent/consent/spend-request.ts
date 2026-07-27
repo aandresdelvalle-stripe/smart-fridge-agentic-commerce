@@ -64,4 +64,8 @@ export class SpendRequestStore {
   list(): SpendRequest[] {
     return [...this.requests.values()];
   }
+
+  clear(): void {
+    this.requests.clear();
+  }
 }

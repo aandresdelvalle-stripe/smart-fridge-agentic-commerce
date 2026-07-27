@@ -23,6 +23,19 @@ describe("developer console flow invariants", () => {
     expect(currentFlow.checkouts[0]?.paymentIntentId).toBeUndefined();
   });
 
+  it("resets demo state for a fresh run", async () => {
+    const stack = await buildTestStack();
+    stacks.push(stack);
+    await stack.agent.app.inject({ method: "POST", url: "/api/demo/start", payload: { mode: "weekly_replenishment" } });
+    const beforeReset = await stack.agent.app.inject({ method: "GET", url: "/api/flow" });
+    expect(beforeReset.json<{ checkouts: unknown[]; spendRequests: unknown[] }>().checkouts.length).toBeGreaterThan(0);
+
+    const reset = await stack.agent.app.inject({ method: "POST", url: "/api/demo/reset" });
+    expect(reset.statusCode).toBe(200);
+    const afterReset = reset.json<{ checkouts: unknown[]; spendRequests: unknown[]; auditEvents: unknown[] }>();
+    expect(afterReset).toMatchObject({ checkouts: [], spendRequests: [], auditEvents: [] });
+  });
+
   it("handles a duplicate webhook delivery idempotently", async () => {
     const stack = await buildTestStack();
     stacks.push(stack);

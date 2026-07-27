@@ -39,4 +39,8 @@ export class StripeWebhookHandler {
     else this.auditLog.record(event.type, "Webhook received and recorded.");
     return { duplicate: false, type: event.type };
   }
+
+  clear(): void {
+    this.processed.clear();
+  }
 }

@@ -3,12 +3,21 @@ import Fastify from "fastify";
 import { z } from "zod";
 import { AuditLog } from "../audit-log.js";
 import { SpendRequestStore } from "./consent/spend-request.js";
-import { createMarketplaceClient, type MarketplaceClient } from "./marketplace-client.js";
+import { createAcpClient, type AcpClient } from "./acp/client.js";
+import { isStripeAcsMode } from "./acp/mode.js";
 import { registerAgentRoutes, type AgentDependencies } from "./routes.js";
 
 export interface BuildAgentAppOptions {
-  marketplace?: MarketplaceClient;
+  acp?: AcpClient;
+  resetMarketplace?: () => Promise<void>;
 }
+
+const defaultResetMarketplace = async (): Promise<void> => {
+  if (isStripeAcsMode()) return;
+  const baseUrl = process.env.MARKETPLACE_URL?.trim() || "http://localhost:4242";
+  const response = await fetch(`${baseUrl}/api/demo/reset`, { method: "POST" });
+  if (!response.ok) throw new Error("Unable to reset marketplace demo state.");
+};
 
 export const buildAgentApp = async (options: BuildAgentAppOptions = {}) => {
   const app = Fastify({ logger: true });
@@ -21,8 +30,9 @@ export const buildAgentApp = async (options: BuildAgentAppOptions = {}) => {
   const auditLog = new AuditLog();
   const dependencies: AgentDependencies = {
     spendRequests: new SpendRequestStore(),
-    marketplace: options.marketplace ?? createMarketplaceClient(),
+    acp: options.acp ?? createAcpClient(),
     auditLog,
+    resetMarketplace: options.resetMarketplace ?? defaultResetMarketplace,
   };
   await registerAgentRoutes(app, dependencies);
 

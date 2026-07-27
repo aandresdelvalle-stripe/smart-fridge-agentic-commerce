@@ -7,6 +7,7 @@ type AuditEvent = { id: string; type: string; at: string; detail: string };
 type Flow = { checkouts: Checkout[]; spendRequests: SpendRequest[]; auditEvents: AuditEvent[]; developmentSimulation: boolean };
 type AppConfig = {
   demoMode: boolean;
+  acsMode: "local" | "stripe";
   stripePublishableKey: string | null;
   sellerNetworkProfile: string | null;
   savedPaymentAuthority: boolean;
@@ -57,6 +58,20 @@ export function App() {
     setFlow(await flowResponse.json() as Flow);
     setConfig(await configResponse.json() as AppConfig);
   };
+  const reset = async () => {
+    setBusy("reset"); setError(undefined);
+    try {
+      const response = await fetch("/api/demo/reset", { method: "POST" });
+      const result = await response.json() as Flow & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Unable to reset the demo.");
+      setUpdatingPaymentMethod(false);
+      setFlow(result);
+      const configResponse = await fetch("/api/config");
+      if (!configResponse.ok) throw new Error("Unable to load configuration.");
+      setConfig(await configResponse.json() as AppConfig);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Unexpected error."); }
+    finally { setBusy(undefined); }
+  };
   useEffect(() => { void load().catch((cause: Error) => setError(cause.message)); }, []);
 
   const call = async (action: string, url: string, body?: unknown) => {
@@ -89,8 +104,9 @@ export function App() {
       <div>
         <p className="eyebrow">GreenMart developer flow console</p>
         <h1>Bounded autonomous grocery checkout</h1>
-        <p>Trace the sensor event, ACP checkout, policy decision, payment authority, SPT, PaymentIntent, and fulfillment result.</p>
-        <p><span className={`pill ${demoMode ? "demo" : "live"}`}>{demoMode ? "DEMO_MODE=true" : "DEMO_MODE=false · Stripe test integration"}</span></p>
+        <p>Trace the sensor event, ACP checkout against GreenMart’s Agentic Commerce Suite seller surface, policy decision, payment authority, SPT, PaymentIntent, and fulfillment result.</p>
+        <p><span className={`pill ${demoMode ? "demo" : "live"}`}>{demoMode ? "DEMO_MODE=true" : "DEMO_MODE=false · Stripe test integration"}</span>{" "}
+          <span className="pill">{config.acsMode === "stripe" ? "ACS_MODE=stripe · Delegated Checkout" : "ACS_MODE=local · simulated /acp"}</span></p>
       </div>
       {demoMode
         ? <aside className="notice-demo"><strong>Development simulation</strong><br />Approve creates a local `spt_demo_…` token. No Stripe API calls are made.</aside>
@@ -104,7 +120,7 @@ export function App() {
     <section className="actions" aria-label="Run demo scenarios">
       <button disabled={Boolean(busy)} onClick={() => void call("weekly", "/api/demo/start", { mode: "weekly_replenishment" })}>Run Friday replenishment</button>
       <button disabled={Boolean(busy)} className="secondary" onClick={() => void call("urgent", "/api/demo/start", { mode: "urgent_replenishment" })}>Run urgent milk order</button>
-      <button disabled={Boolean(busy)} className="quiet" onClick={() => void load()}>Refresh</button>
+      <button disabled={Boolean(busy)} className="quiet" onClick={() => void reset()}>{busy === "reset" ? "Resetting…" : "Reset demo"}</button>
     </section>
     {error && <p className="error" role="alert">{error}</p>}
 
@@ -115,7 +131,7 @@ export function App() {
     </section>
 
     <section className="grid">
-      <StepCard actors={["agent", "marketplace"]} title="1. Fridge event and ACP checkout">
+      <StepCard actors={["agent", "marketplace"]} title="1. Fridge event and ACP checkout via ACS">
         {latestCheckout ? <>
           <p><strong>{latestCheckout.mode.replaceAll("_", " ")}</strong> · {latestCheckout.id}</p>
           <ul>{latestCheckout.items.map((item) => <li key={item.name}>{item.quantity} × {item.name}</li>)}</ul>

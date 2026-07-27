@@ -8,15 +8,23 @@ import { issueSharedPaymentToken, retrieveIssuedSharedPaymentToken } from "./str
 import { assertGrantedTokenMatchesCheckout } from "../marketplace/stripe/granted-token.js";
 import { isDemoMode } from "./stripe/client.js";
 import { getAgentPublicConfig, getHouseholdPaymentMethod } from "./stripe/public-config.js";
-import type { MarketplaceClient } from "./marketplace-client.js";
+import type { AcpClient } from "./acp/client.js";
+import { isStripeAcsMode } from "./acp/mode.js";
+import { confirmStripeAcsPayment, finalizeStripeAcsPayment, StripeAcpClient } from "./acp/stripe-client.js";
 
 const modeSchema = z.enum(["weekly_replenishment", "urgent_replenishment"]);
 
 export interface AgentDependencies {
   spendRequests: SpendRequestStore;
-  marketplace: MarketplaceClient;
+  acp: AcpClient;
   auditLog: AuditLog;
+  resetMarketplace: () => Promise<void>;
 }
+
+const requireStripeAcpClient = (acp: AcpClient): StripeAcpClient => {
+  if (!(acp instanceof StripeAcpClient)) throw new Error("ACS_MODE=stripe requires the Stripe Delegated Checkout ACP client.");
+  return acp;
+};
 
 const issueAuthorization = async (
   spendRequestId: string,
@@ -27,7 +35,27 @@ const issueAuthorization = async (
   const spendRequest = dependencies.spendRequests.get(spendRequestId);
   if (spendRequest.status !== "pending") throw new Error(`Spend request is ${spendRequest.status}.`);
 
-  const checkout = await dependencies.marketplace.getCheckout(spendRequest.checkoutId);
+  if (isStripeAcsMode()) {
+    const stripeAcp = requireStripeAcpClient(dependencies.acp);
+    const authorization = await confirmStripeAcsPayment(spendRequest.checkoutId, paymentMethodId, stripeAcp);
+    dependencies.auditLog.record("payment_authorization.requested", `Confirmed delegated checkout ${spendRequest.checkoutId} with status ${authorization.status}.`);
+
+    if (authorization.status === "requires_action") {
+      return {
+        status: "requires_action" as const,
+        issuedTokenId: authorization.issuedTokenId,
+        nextAction: authorization.nextAction,
+      };
+    }
+
+    const tokenId = authorization.sharedPaymentToken;
+    if (!tokenId) throw new Error("Stripe did not return a Shared Payment Token for this delegated checkout.");
+    const approved = dependencies.spendRequests.approveWithGrantedToken(spendRequestId, tokenId);
+    dependencies.auditLog.record("payment_authorization.approved", approvedAuditMessage.replace("{token}", tokenId).replace("{seller}", approved.seller));
+    return { status: "approved" as const, spendRequest: approved };
+  }
+
+  const checkout = await dependencies.acp.getCheckout(spendRequest.checkoutId);
   const issuedToken = await issueSharedPaymentToken(checkout, spendRequest, paymentMethodId);
   dependencies.auditLog.record("payment_authorization.requested", `Issued SPT ${issuedToken.id} for ${spendRequest.seller} with status ${issuedToken.status}.`);
 
@@ -47,19 +75,19 @@ const issueAuthorization = async (
 };
 
 export const registerAgentRoutes = async (app: FastifyInstance, dependencies: AgentDependencies): Promise<void> => {
-  app.get("/api/health", async () => ({ ok: true, service: "agent", demoMode: isDemoMode() }));
+  app.get("/api/health", async () => ({ ok: true, service: "agent", demoMode: isDemoMode(), acsMode: dependencies.acp.mode ?? "local" }));
 
   app.get("/api/config", async () => {
-    const marketplaceConfig = isDemoMode() ? { sellerNetworkProfile: null } : await dependencies.marketplace.getConfig();
-    return getAgentPublicConfig(marketplaceConfig.sellerNetworkProfile);
+    const sellerConfig = isDemoMode() ? { sellerNetworkProfile: null } : await dependencies.acp.getSellerConfig();
+    return getAgentPublicConfig(sellerConfig.sellerNetworkProfile);
   });
 
   app.get("/api/flow", async () => {
-    const marketplaceFlow = await dependencies.marketplace.getFlow();
-    const auditEvents = [...dependencies.auditLog.list(), ...marketplaceFlow.auditEvents]
+    const sellerFlow = await dependencies.acp.getSellerFlow();
+    const auditEvents = [...dependencies.auditLog.list(), ...sellerFlow.auditEvents]
       .sort((left, right) => left.at.localeCompare(right.at));
     return {
-      checkouts: marketplaceFlow.checkouts,
+      checkouts: sellerFlow.checkouts,
       spendRequests: dependencies.spendRequests.list(),
       auditEvents,
       developmentSimulation: isDemoMode(),
@@ -71,26 +99,35 @@ export const registerAgentRoutes = async (app: FastifyInstance, dependencies: Ag
     const event = eventForMode(mode);
     dependencies.auditLog.record("fridge.inventory_detected", event.description);
 
-    const checkout = await dependencies.marketplace.createCheckout({ mode, items: event.cart });
-    dependencies.auditLog.record("acp.checkout_created", `GreenMart returned final checkout ${checkout.id} for $${(checkout.total / 100).toFixed(2)}.`);
+    const checkout = await dependencies.acp.createCheckout({ mode, items: event.cart });
+    dependencies.auditLog.record("acp.checkout_created", `GreenMart ACS returned final checkout ${checkout.id} for $${(checkout.total / 100).toFixed(2)}.`);
 
     const policy = evaluateCheckout(checkout);
     dependencies.auditLog.record(`policy.${policy.outcome}`, policy.reasons.join(" "));
 
     if (policy.outcome !== "approved") {
-      await dependencies.marketplace.updateCheckoutStatus(checkout.id, policy.outcome === "escalated" ? "requires_approval" : "payment_failed");
+      await dependencies.acp.updateCheckoutStatus(checkout.id, policy.outcome === "escalated" ? "requires_approval" : "payment_failed");
       const flow = await app.inject({ method: "GET", url: "/api/flow" });
       const flowBody = flow.json<{ checkouts: unknown[]; spendRequests: unknown[]; auditEvents: unknown[]; developmentSimulation: boolean }>();
       return reply.code(409).send({ event, checkout, policy, ...flowBody });
     }
 
     const spendRequest = dependencies.spendRequests.create(checkout, policy);
-    await dependencies.marketplace.updateCheckoutStatus(checkout.id, "requires_approval");
+    await dependencies.acp.updateCheckoutStatus(checkout.id, "requires_approval");
     dependencies.auditLog.record("payment_authorization.requested", `Household payment authorization requested for GreenMart, expiring ${spendRequest.expiresAt}.`);
 
     const flow = await app.inject({ method: "GET", url: "/api/flow" });
     const flowBody = flow.json<{ checkouts: unknown[]; spendRequests: unknown[]; auditEvents: unknown[]; developmentSimulation: boolean }>();
     return { event, checkout, policy, spendRequest, ...flowBody };
+  });
+
+  app.post("/api/demo/reset", async () => {
+    dependencies.spendRequests.clear();
+    dependencies.auditLog.clear();
+    if (dependencies.acp instanceof StripeAcpClient) dependencies.acp.reset();
+    await dependencies.resetMarketplace();
+    const flow = await app.inject({ method: "GET", url: "/api/flow" });
+    return flow.json();
   });
 
   app.post("/api/spend-requests/:spendRequestId/approve", async (request, reply) => {
@@ -137,7 +174,20 @@ export const registerAgentRoutes = async (app: FastifyInstance, dependencies: Ag
     const spendRequest = dependencies.spendRequests.get(spendRequestId);
     if (spendRequest.status !== "pending") return reply.code(409).send({ error: `Spend request is ${spendRequest.status}.` });
 
-    const checkout = await dependencies.marketplace.getCheckout(spendRequest.checkoutId);
+    if (isStripeAcsMode()) {
+      try {
+        const stripeAcp = requireStripeAcpClient(dependencies.acp);
+        const authorization = await finalizeStripeAcsPayment(spendRequest.checkoutId, stripeAcp);
+        const approved = dependencies.spendRequests.approveWithGrantedToken(spendRequestId, authorization.sharedPaymentToken!);
+        dependencies.auditLog.record("payment_authorization.approved", `Household wallet finalized delegated checkout SPT ${issuedTokenId} for ${approved.seller}.`);
+        return { status: "approved", spendRequest: approved };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Authorization could not be finalized.";
+        return reply.code(409).send({ error: message });
+      }
+    }
+
+    const checkout = await dependencies.acp.getCheckout(spendRequest.checkoutId);
     const issuedToken = await retrieveIssuedSharedPaymentToken(issuedTokenId);
     if (issuedToken.status !== "active") return reply.code(409).send({ error: `Issued SPT is ${issuedToken.status}.`, status: issuedToken.status });
 
@@ -156,14 +206,14 @@ export const registerAgentRoutes = async (app: FastifyInstance, dependencies: Ag
     }
 
     try {
-      const result = await dependencies.marketplace.completeCheckout(checkoutId, {
+      const result = await dependencies.acp.completeCheckout(checkoutId, {
         idempotencyKey,
         sharedPaymentToken: spendRequest.sharedPaymentToken,
       });
-      dependencies.auditLog.record("acp.checkout_completed", `GreenMart confirmed order ${result.checkout.orderId ?? checkoutId}.`);
+      dependencies.auditLog.record("acp.checkout_completed", `GreenMart ACS confirmed order ${result.checkout.orderId ?? checkoutId}.`);
       return result;
     } catch (error) {
-      return reply.code(502).send({ error: error instanceof Error ? error.message : "Marketplace completion failed." });
+      return reply.code(502).send({ error: error instanceof Error ? error.message : "ACP checkout completion failed." });
     }
   });
 };

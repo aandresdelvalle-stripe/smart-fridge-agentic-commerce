@@ -12,6 +12,6 @@ describe("public app config", () => {
     stacks.push(stack);
     const response = await stack.agent.app.inject({ method: "GET", url: "/api/config" });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ demoMode: true, stripePublishableKey: null, savedPaymentAuthority: false });
+    expect(response.json()).toMatchObject({ demoMode: true, acsMode: "local", stripePublishableKey: null, savedPaymentAuthority: false });
   });
 });

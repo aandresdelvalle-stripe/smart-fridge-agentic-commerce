@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { products } from "../src/shared/catalog/greenmart-catalog.js";
 
+/** Generates a catalog feed artifact for GreenMart's Agentic Commerce Suite onboarding. */
+
 const feed = {
   generated_at: new Date().toISOString(),
   merchant: { id: "greenmart", name: "GreenMart" },

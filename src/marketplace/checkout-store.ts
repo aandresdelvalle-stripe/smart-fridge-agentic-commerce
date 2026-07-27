@@ -102,4 +102,9 @@ export class CheckoutStore {
   list(): Checkout[] {
     return [...this.checkouts.values()];
   }
+
+  clear(): void {
+    this.checkouts.clear();
+    this.completions.clear();
+  }
 }

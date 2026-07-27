@@ -13,4 +13,8 @@ export class AuditLog {
   list(): AuditEvent[] {
     return [...this.entries];
   }
+
+  clear(): void {
+    this.entries.length = 0;
+  }
 }

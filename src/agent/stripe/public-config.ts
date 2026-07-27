@@ -1,7 +1,9 @@
 import { isDemoMode } from "./client.js";
+import { getAcsMode, type AcsMode } from "../acp/mode.js";
 
 export interface AgentPublicConfig {
   demoMode: boolean;
+  acsMode: AcsMode;
   stripePublishableKey: string | null;
   sellerNetworkProfile: string | null;
   savedPaymentAuthority: boolean;
@@ -20,6 +22,7 @@ export const getAgentPublicConfig = (sellerNetworkProfile: string | null): Agent
   const savedPaymentMethod = demoMode ? null : getHouseholdPaymentMethod();
   return {
     demoMode,
+    acsMode: getAcsMode(),
     stripePublishableKey: demoMode ? null : process.env.AGENT_STRIPE_PUBLISHABLE_KEY?.trim() || process.env.STRIPE_PUBLISHABLE_KEY?.trim() || null,
     sellerNetworkProfile: demoMode ? null : sellerNetworkProfile,
     savedPaymentAuthority: Boolean(savedPaymentMethod),
