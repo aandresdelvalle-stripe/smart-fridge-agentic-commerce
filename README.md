@@ -2,11 +2,15 @@
 
 A public Node.js 22 + TypeScript reference application for a smart-fridge shopping agent and the fictional GreenMart marketplace. It demonstrates bounded household authority, Shared Payment Tokens (SPTs), and the split between **Stripe Agentic Commerce Suite (ACS)** on the seller side and the **Agentic Commerce Protocol (ACP)** on the agent side.
 
+The explanatory article  accompanying this repo can be found in the Stripe Dev Rel Blog:  [Agentic payments for marketplaces: How a smart fridge can shop safely](https://stripe.dev/blog/agentic-payments-for-marketplaces).
+
 > **Stripe Agentic Commerce Suite is not generally available (GA) as of July 27, 2026.**
 > ACS is rolling out in limited preview (US and Canada). You must **request access** before you can use the real Stripe-hosted seller surface or Delegated Checkout APIs in your own Stripe accounts.
 > Join the [ACS waitlist / contact sales](https://go.stripe.global/agentic-commerce-contact-sales) or complete [Agentic commerce onboarding](https://dashboard.stripe.com/agentic-commerce) if it appears on your Dashboard.
 >
 > **Until ACS is enabled on your accounts, use the defaults:** `DEMO_MODE=true` and `ACS_MODE=local`. No Stripe ACS access is required to explore the flow.
+
+
 
 ## What the sample demonstrates
 
@@ -29,20 +33,24 @@ Smart fridge → shopping agent (:4243) ──ACP client──► GreenMart ACS 
                                                            └── catalog feed, webhooks, fulfillment
 ```
 
-| Role | Service | Port | Stripe keys | Protocol / product |
-|---|---|---|---|---|
-| **GreenMart seller** | Marketplace | 4242 | `MARKETPLACE_STRIPE_*` | **Agentic Commerce Suite** — catalog feed, ACS onboarding, hosted ACP seller surface (`/acp/*`), PaymentIntent, webhooks |
-| **Shopping agent + wallet** | Agent | 4243 | `AGENT_STRIPE_*` | **ACP client** — calls GreenMart’s ACS-exposed checkout, issues SPTs, Payment Element |
-| **Developer console** | Web | 5173 | — | Proxies `/api` → agent; `/webhooks` → marketplace |
+
+| Role                        | Service     | Port | Stripe keys            | Protocol / product                                                                                                       |
+| --------------------------- | ----------- | ---- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **GreenMart seller**        | Marketplace | 4242 | `MARKETPLACE_STRIPE_`* | **Agentic Commerce Suite** — catalog feed, ACS onboarding, hosted ACP seller surface (`/acp/`*), PaymentIntent, webhooks |
+| **Shopping agent + wallet** | Agent       | 4243 | `AGENT_STRIPE_`*       | **ACP client** — calls GreenMart’s ACS-exposed checkout, issues SPTs, Payment Element                                    |
+| **Developer console**       | Web         | 5173 | —                      | Proxies `/api` → agent; `/webhooks` → marketplace                                                                        |
+
 
 In production, GreenMart enables [Agentic Commerce Suite](https://docs.stripe.com/agentic-commerce/for-sellers) in the Stripe Dashboard (after access is granted), uploads a catalog feed, and Stripe hosts the ACP seller endpoint. This repository supports two agent integration paths:
 
-| `ACS_MODE` | Agent checkout path | When to use |
-|---|---|---|
-| **`local`** (default) | HTTP ACP client → simulated ACS surface at `http://localhost:4242/acp/*` | No ACS access needed; default for this repo |
-| **`stripe`** | Stripe **Delegated Checkout API** (`RequestedSession`) | After ACS is enabled on your agent + seller test accounts |
 
-With `ACS_MODE=local`, the marketplace service simulates the ACS-hosted ACP seller surface. With `ACS_MODE=stripe`, the agent talks directly to Stripe and **`dev:marketplace` is optional** for checkout (still useful for webhooks and seller-side observability).
+| `ACS_MODE`        | Agent checkout path                                                      | When to use                                               |
+| ----------------- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `local` (default) | HTTP ACP client → simulated ACS surface at `http://localhost:4242/acp/*` | No ACS access needed; default for this repo               |
+| `stripe`          | Stripe **Delegated Checkout API** (`RequestedSession`)                   | After ACS is enabled on your agent + seller test accounts |
+
+
+With `ACS_MODE=local`, the marketplace service simulates the ACS-hosted ACP seller surface. With `ACS_MODE=stripe`, the agent talks directly to Stripe and `dev:marketplace` **is optional** for checkout (still useful for webhooks and seller-side observability).
 
 In Stripe test mode, agent and marketplace use **separate** Stripe test accounts so network profiles differ — required for real SPT issuance.
 
@@ -71,9 +79,9 @@ npm run dev:web           # terminal 3 — console on :5173
 
 Open `http://localhost:5173`. The header pills show `DEMO_MODE` and `ACS_MODE`.
 
-**With `ACS_MODE=local` (default), both API servers must be running.** The agent calls the simulated ACS surface at `MARKETPLACE_URL/acp` (default `http://localhost:4242/acp`).
+**With** `ACS_MODE=local` **(default), both API servers must be running.** The agent calls the simulated ACS surface at `MARKETPLACE_URL/acp` (default `http://localhost:4242/acp`).
 
-**With `ACS_MODE=stripe`, only `dev:agent` is required for checkout** (plus `DEMO_MODE=false` and agent Stripe keys). Run `dev:marketplace` if you want local webhooks or seller-side dev endpoints.
+**With** `ACS_MODE=stripe`**, only** `dev:agent` **is required for checkout** (plus `DEMO_MODE=false` and agent Stripe keys). Run `dev:marketplace` if you want local webhooks or seller-side dev endpoints.
 
 After changing `.env`, restart affected servers.
 
@@ -83,6 +91,8 @@ Generate GreenMart’s ACS catalog feed artifact:
 npm run generate:feed   # writes greenmart-product-feed.json
 ```
 
+
+
 ## Operating modes
 
 Two independent toggles in `.env`:
@@ -91,26 +101,32 @@ Two independent toggles in `.env`:
 
 Defaults to `true` in `.env.example`.
 
-| | `DEMO_MODE=true` (default) | `DEMO_MODE=false` |
-|---|---|---|
-| **Stripe API calls** | None | Real test-mode calls |
-| **Stripe credentials** | Not required | Two separate test accounts (see below) |
-| **Step 3 — payment authorization** | **Approve spend request (simulation)** button | Household wallet (Payment Element) or saved payment method |
-| **SPT created** | Local `spt_demo_…` string | Real `spt_…` (see `ACS_MODE` below) |
-| **PaymentIntent** | Simulated `pi_demo_…` | Real `pi_…` on the marketplace ACS account (local mode) or via Delegated Checkout (stripe mode) |
-| **Webhooks** | Accepted without signature verification | Verified with `MARKETPLACE_STRIPE_WEBHOOK_SECRET` |
+
+|                                    | `DEMO_MODE=true` (default)                    | `DEMO_MODE=false`                                                                               |
+| ---------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Stripe API calls**               | None                                          | Real test-mode calls                                                                            |
+| **Stripe credentials**             | Not required                                  | Two separate test accounts (see below)                                                          |
+| **Step 3 — payment authorization** | **Approve spend request (simulation)** button | Household wallet (Payment Element) or saved payment method                                      |
+| **SPT created**                    | Local `spt_demo_…` string                     | Real `spt_…` (see `ACS_MODE` below)                                                             |
+| **PaymentIntent**                  | Simulated `pi_demo_…`                         | Real `pi_…` on the marketplace ACS account (local mode) or via Delegated Checkout (stripe mode) |
+| **Webhooks**                       | Accepted without signature verification       | Verified with `MARKETPLACE_STRIPE_WEBHOOK_SECRET`                                               |
+
+
+
 
 ### `ACS_MODE` — how the agent reaches GreenMart checkout
 
 Defaults to `local` in `.env.example`.
 
-| | `ACS_MODE=local` (default) | `ACS_MODE=stripe` |
-|---|---|---|
-| **Requires ACS access** | No | **Yes** — agent + seller accounts must have ACS enabled |
-| **Requires `DEMO_MODE=false`** | Only for live Stripe SPT/PI on completion | **Yes** |
-| **Agent integration** | HTTP → `localhost:4242/acp/*` | Stripe `delegated_checkout/requested_sessions` |
-| **Marketplace server** | Required | Optional |
-| **Payment authorization** | Agent issues SPT via `issued_tokens`, marketplace charges on complete | Agent confirms `RequestedSession`; Stripe routes SPT + payment to seller |
+
+|                                | `ACS_MODE=local` (default)                                            | `ACS_MODE=stripe`                                                        |
+| ------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Requires ACS access**        | No                                                                    | **Yes** — agent + seller accounts must have ACS enabled                  |
+| **Requires** `DEMO_MODE=false` | Only for live Stripe SPT/PI on completion                             | **Yes**                                                                  |
+| **Agent integration**          | HTTP → `localhost:4242/acp/`*                                         | Stripe `delegated_checkout/requested_sessions`                           |
+| **Marketplace server**         | Required                                                              | Optional                                                                 |
+| **Payment authorization**      | Agent issues SPT via `issued_tokens`, marketplace charges on complete | Agent confirms `RequestedSession`; Stripe routes SPT + payment to seller |
+
 
 `ACS_MODE=stripe` is for accounts that already have ACS preview access. It will fail with Stripe API errors if your account has not been onboarded.
 
@@ -131,12 +147,14 @@ Safe for first-run exploration. No Stripe Dashboard setup required.
 - No calls to Stripe (`issued_tokens`, `payment_intents`, Payment Element, etc.).
 - Wallet endpoints (`/authorize`, `/authorize-saved`, `/finalize-authorization`) return 403.
 
-**`.env` for demo mode**
+`.env` **for demo mode**
 
 ```bash
 DEMO_MODE=true
 # No Stripe keys needed. AGENT_STRIPE_* and MARKETPLACE_STRIPE_* can stay empty.
 ```
+
+
 
 ### `DEMO_MODE=false` + `ACS_MODE=local` — Stripe test integration (simulated ACS)
 
@@ -146,7 +164,7 @@ Use this when you have Stripe test keys but **not** ACS preview access yet.
 
 1. **Agent Stripe test account** — household wallet; issues SPTs via `issued_tokens`.
 2. **Marketplace Stripe test account** — GreenMart seller; validates granted SPTs and creates PaymentIntents.
-3. **`GREENMART_SELLER_NETWORK_PROFILE`** from the marketplace account (create a network business profile even without ACS).
+3. `GREENMART_SELLER_NETWORK_PROFILE` from the marketplace account (create a network business profile even without ACS).
 
 See `.env` example below. Payment authorization uses `issued_tokens` on the agent account; completion charges the marketplace account.
 
@@ -167,7 +185,7 @@ The agent creates a `RequestedSession`, confirms it with the household wallet, a
 
 1. **Agent Stripe test account** — `AGENT_STRIPE_SECRET_KEY`, `AGENT_STRIPE_PUBLISHABLE_KEY`
 2. **Marketplace Stripe test account** (required for `ACS_MODE=local`) — `MARKETPLACE_STRIPE_SECRET_KEY`, `MARKETPLACE_STRIPE_WEBHOOK_SECRET`
-3. **`GREENMART_SELLER_NETWORK_PROFILE`** from the marketplace account — must differ from the agent account’s own profile
+3. `GREENMART_SELLER_NETWORK_PROFILE` from the marketplace account — must differ from the agent account’s own profile
 
 **Step 3 in the web console**
 
@@ -178,17 +196,19 @@ The simulation **Approve** button is disabled; use the wallet instead.
 
 **Step 4 — complete checkout**
 
-- **`ACS_MODE=local`:** agent forwards the approved `spt_…` to GreenMart’s `/acp/.../complete` endpoint; marketplace confirms a PaymentIntent.
-- **`ACS_MODE=stripe`:** payment is typically confirmed when the wallet authorizes the `RequestedSession`; step 4 retrieves the completed session.
+- `ACS_MODE=local`**:** agent forwards the approved `spt_…` to GreenMart’s `/acp/.../complete` endpoint; marketplace confirms a PaymentIntent.
+- `ACS_MODE=stripe`**:** payment is typically confirmed when the wallet authorizes the `RequestedSession`; step 4 retrieves the completed session.
 
 **Where to find objects in the Stripe Dashboard (test mode)**
 
-| Object | Stripe account | Dashboard |
-|---|---|---|
-| Issued SPT (`spt_…`) | Agent | Agent account, test mode |
+
+| Object                 | Stripe account                                           | Dashboard                          |
+| ---------------------- | -------------------------------------------------------- | ---------------------------------- |
+| Issued SPT (`spt_…`)   | Agent                                                    | Agent account, test mode           |
 | PaymentIntent (`pi_…`) | Marketplace (local mode) or seller via ACS (stripe mode) | Marketplace account → **Payments** |
 
-**`.env` examples**
+
+`.env` **examples**
 
 Local simulation (no ACS access needed):
 
@@ -230,6 +250,8 @@ Preview API version `2026-04-22.preview` (or the version approved for your integ
 3. Browser handles any required customer action (e.g. 3D Secure).
 4. Agent completes checkout via `/acp/.../complete`; marketplace confirms a PaymentIntent with the granted SPT.
 
+
+
 ### Wallet authorization flow (`DEMO_MODE=false`, `ACS_MODE=stripe`)
 
 1. Payment Element creates a `PaymentMethod` client-side.
@@ -248,8 +270,8 @@ stripe listen --forward-to localhost:4242/webhooks/stripe
 
 Copy the signing secret into `MARKETPLACE_STRIPE_WEBHOOK_SECRET`.
 
-- **`DEMO_MODE=true`**: signatures are not verified (local simulation only).
-- **`DEMO_MODE=false`**: signatures are verified against the marketplace webhook secret.
+- `DEMO_MODE=true`: signatures are not verified (local simulation only).
+- `DEMO_MODE=false`: signatures are verified against the marketplace webhook secret.
 
 In production ACS, listen for events such as `checkout.session.completed`. The sample also records `payment_intent.succeeded` and `shared_payment.granted_token.deactivated` in the audit timeline.
 
@@ -267,7 +289,7 @@ The suite covers policy limits, ACS-exposed ACP checkout contracts, the invarian
 
 ## Production checklist
 
-Set `DEMO_MODE=false` only after validating current product access and API behavior for your Stripe accounts. **Confirm ACS is enabled on your account before setting `ACS_MODE=stripe`.**
+Set `DEMO_MODE=false` only after validating current product access and API behavior for your Stripe accounts. **Confirm ACS is enabled on your account before setting** `ACS_MODE=stripe`**.**
 
 - Request or confirm **Agentic Commerce Suite** access (not GA as of July 2026).
 - Onboard the shopping agent; establish an orchestrated commerce agreement (OCA) with GreenMart.
@@ -278,7 +300,7 @@ Set `DEMO_MODE=false` only after validating current product access and API behav
 - Replace the simulation approve path with your production household wallet flow.
 - Keep SPT usage limits (merchant profile, amount, currency, expiry) aligned with the final checkout.
 
-For live-mode testing from a personal Link account, Stripe documents [`link-cli`](https://link.com/agents).
+For live-mode testing from a personal Link account, Stripe documents `[link-cli](https://link.com/agents)`.
 
 ## Key files
 
@@ -297,9 +319,12 @@ For live-mode testing from a personal Link account, Stripe documents [`link-cli`
 - `src/marketplace/stripe/payment.ts` — PaymentIntent with `payment_method_data.shared_payment_granted_token`.
 - `web/` — React/Vite developer flow console.
 
+
+
 ## Learn more
 
 - [Stripe Agentic Commerce](https://docs.stripe.com/agentic-commerce)
 - [Agentic Commerce Suite for sellers](https://docs.stripe.com/agentic-commerce/for-sellers)
 - [Agentic Commerce Suite for agents](https://docs.stripe.com/agentic-commerce/for-agents)
 - [Shared Payment Tokens](https://docs.stripe.com/agentic-commerce/concepts/shared-payment-tokens)
+
